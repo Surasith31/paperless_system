@@ -1,0 +1,81 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getAuthUser } from "@/lib/auth";
+import { checkUserAccessToDocument } from "@/repositories/documents";
+import fs from "fs/promises";
+import path from "path";
+
+const uploadsDir = path.join(process.cwd(), "uploads");
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  try {
+    // ✅ เช็ค Authentication
+    const user = getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { path: filePath } = await params;
+    const filePathStr = filePath.join("/");
+
+    // ✅ เช็ค Permission - ดึง document_id จาก path (format: doc_26_0_filename)
+    const match = filePathStr.match(/doc_(\d+)_/);
+    if (match) {
+      const documentId = parseInt(String(match[1]));
+      const hasAccess = await checkUserAccessToDocument(
+        user.userId,
+        documentId
+      );
+
+      if (!hasAccess) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+    // ถ้าไม่ match pattern (เช่น temp files) ให้ผ่านไปได้
+
+    const fullPath = path.join(uploadsDir, ...filePath);
+
+    const normalizedPath = path.normalize(fullPath);
+    if (!normalizedPath.startsWith(uploadsDir)) {
+      return NextResponse.json({ error: "Invalid path" }, { status: 403 });
+    }
+
+    try {
+      await fs.access(fullPath);
+    } catch {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
+    const fileBuffer = await fs.readFile(fullPath);
+
+    const ext = path.extname(fullPath).toLowerCase();
+    const contentTypes: Record<string, string> = {
+      ".pdf": "application/pdf",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+      ".xlsx":
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ".xls": "application/vnd.ms-excel",
+    };
+
+    const contentType = contentTypes[ext] || "application/octet-stream";
+
+    return new NextResponse(new Uint8Array(fileBuffer), {
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=86400",
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error serving file:", error);
+    return NextResponse.json(
+      { error: "Failed to serve file" },
+      { status: 500 }
+    );
+  }
+}
