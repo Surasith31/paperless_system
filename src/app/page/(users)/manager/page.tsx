@@ -21,6 +21,7 @@ import {
   Search,
   SortAsc,
   ArrowLeft,
+  RefreshCw,
 } from "lucide-react";
 import { Engineer, userGetResponse } from "@/models/user";
 import ActivityTimeline from "@/components/ActivityTimeline";
@@ -64,6 +65,10 @@ export default function ManagerApprovals() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
+  // Polling states
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const fetchUserProfile = useCallback(async () => {
     try {
       const response = await fetch("/api/auth/profile", {
@@ -78,11 +83,6 @@ export default function ManagerApprovals() {
       const data = await response.json();
       if (data.success && data.user) {
         setUser(data.user);
-
-        // Check if user is Manager
-        if (data.user.role !== 2) {
-          router.push("/page/dashboard");
-        }
       }
     } catch (err) {
       console.error("Error:", err);
@@ -99,11 +99,34 @@ export default function ManagerApprovals() {
       if (response.ok) {
         const data = await response.json();
         setDocuments(data.documents || []);
+        setLastUpdated(new Date());
       }
     } catch (err) {
       console.error("Error fetching documents:", err);
     } finally {
       setIsLoading(false);
+    }
+  }, []);
+
+  // Silent poll — ไม่ trigger isLoading เพื่อไม่ให้กระพิบ
+  const silentFetch = useCallback(async () => {
+    try {
+      const response = await fetch("/api/approvals/pending", {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDocuments((prev) => {
+          if (data.documents?.length > prev.length) {
+            setSuccess(`มีเอกสารใหม่ ${data.documents.length - prev.length} รายการ`);
+            setTimeout(() => setSuccess(""), 4000);
+          }
+          return data.documents || [];
+        });
+        setLastUpdated(new Date());
+      }
+    } catch {
+      // ไม่แสดง error สำหรับ background poll
     }
   }, []);
 
@@ -127,6 +150,18 @@ export default function ManagerApprovals() {
     fetchPendingDocuments();
     fetchEngineers();
   }, [fetchUserProfile, fetchPendingDocuments, fetchEngineers]);
+
+  // Auto poll ทุก 30 วินาที (silent — ไม่กระพิบ)
+  useEffect(() => {
+    const interval = setInterval(silentFetch, 30000);
+    return () => clearInterval(interval);
+  }, [silentFetch]);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await silentFetch();
+    setIsRefreshing(false);
+  };
 
   // ESC key handler for modals
   useEffect(() => {
@@ -429,9 +464,25 @@ export default function ManagerApprovals() {
           </div>
         </div>
 
+        {/* Refresh Bar */}
+        <div className="flex items-center justify-between mb-3 px-1">
+          <span className="text-xs text-gray-400">
+            {lastUpdated
+              ? `อัปเดตล่าสุด ${lastUpdated.toLocaleTimeString("th-TH")}`
+              : "กำลังโหลด..."}
+          </span>
+          <button
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50 transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+            รีเฟรช
+          </button>
+        </div>
+
         {/* Search & Filter Section */}
-        <div className="bg-white rounded-xl shadow-md border border-gray-100 p-6 mb-4  transition-shadow">
-          <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="bg-white rounded-xl shadow-md border border-gray-100 p-6 mb-4 transition-shadow">          <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {/* Search Bar */}
             <div className="md:col-span-2 lg:col-span-3">
               <div className="relative">

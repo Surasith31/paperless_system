@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { getDocumentTitle } from "@/repositories/documents";
 import { getDocumentFilesForZip } from "@/repositories/fileStorage";
+import { logActivity } from "@/repositories/activities";
 import JSZip from "jszip";
 import fs from "fs/promises";
 import path from "path";
@@ -72,6 +73,15 @@ export async function GET(
 
     // Generate ZIP
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+
+    // บันทึก activity log
+    await logActivity(
+      user.userId,
+      documentId,
+      "files_downloaded_zip",
+      `ดาวน์โหลดไฟล์ทั้งหมดของเอกสาร "${documentTitle}" เป็น ZIP (${files.length} ไฟล์)`,
+      { document_title: documentTitle, file_count: files.length }
+    );
 
     // Return ZIP file
     const sanitizedTitle = documentTitle.replace(/[^a-zA-Z0-9]/g, "_");

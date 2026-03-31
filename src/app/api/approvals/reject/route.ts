@@ -13,6 +13,13 @@ import { sendRejectionNotificationEmail } from "@/lib/email";
 import { logActivity } from "@/repositories/activities";
 import { RejectRequest } from "@/models/workflow";
 import { pool } from "@/lib/db";
+import { trackError } from "@/lib/errorTracking";
+import { z } from "zod";
+
+const rejectSchema = z.object({
+  document_id: z.number({ invalid_type_error: "document_id ต้องเป็นตัวเลข" }).int().positive(),
+  comment: z.string().min(1, "กรุณาระบุเหตุผลในการปฏิเสธ").max(1000),
+});
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,16 +38,14 @@ export async function POST(req: NextRequest) {
     }
 
     // รับข้อมูลจาก request
-    const body: RejectRequest = await req.json();
-    const { document_id, comment } = body;
-
-    // Validate input
-    if (!document_id || !comment) {
+    const parsed = rejectSchema.safeParse(await req.json());
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "กรุณาระบุ document_id และเหตุผลในการปฏิเสธ" },
+        { error: parsed.error.errors[0].message },
         { status: 400 }
       );
     }
+    const { document_id, comment } = parsed.data;
 
     // ตรวจสอบว่าเอกสารนี้รอ user นี้อนุมัติจริงหรือไม่
     const pendingApproval = await getPendingApprovalForUser(
@@ -59,17 +64,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ไม่อนุมัติเอกสาร
-    const result = await rejectDocument(document_id, user.userId, comment);
+    // ไม่อนุมัติเอกสาร + บันทึก activity log ใน transaction เดียวกัน
+    const txClient = await pool.connect();
+    let result;
+    try {
+      await txClient.query("BEGIN");
 
-    // บันทึก activity log
-    await logActivity(
-      user.userId,
-      document_id,
-      "document_rejected",
-      `เอกสารไม่ผ่านการอนุมัติ`,
-      { comment }
-    );
+      result = await rejectDocument(document_id, user.userId, comment, txClient);
+
+      await logActivity(
+        user.userId,
+        document_id,
+        "document_rejected",
+        `เอกสารไม่ผ่านการอนุมัติ`,
+        { comment },
+        txClient
+      );
+
+      await txClient.query("COMMIT");
+    } catch (err) {
+      await txClient.query("ROLLBACK");
+      throw err;
+    } finally {
+      txClient.release();
+    }
 
     // ส่ง email แจ้งเตือน Sell (ไม่ block response)
     const client = await pool.connect();
@@ -110,7 +128,10 @@ export async function POST(req: NextRequest) {
       workflow: result.workflow,
     });
   } catch (error: unknown) {
-    console.error("Error rejecting document:", error);
+    trackError(error instanceof Error ? error : new Error(String(error)), {
+      url: "/api/approvals/reject",
+      action: "reject_document",
+    });
     return NextResponse.json(
       { error: "เกิดข้อผิดพลาดในการปฏิเสธเอกสาร" },
       { status: 500 }

@@ -2,18 +2,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { signJWT, setAuthCookie } from "@/lib/auth";
 import { validateUserCredentials, getRoleName } from "@/repositories/users";
+import { trackError } from "@/lib/errorTracking";
+import { rateLimit, getClientIP } from "@/lib/rateLimiter";
+import { z } from "zod";
+
+const loginSchema = z.object({
+  email: z.string().email("รูปแบบอีเมลไม่ถูกต้อง"),
+  password: z.string().min(1, "กรุณากรอกรหัสผ่าน"),
+});
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password } = await req.json();
-
-    // Validate input
-    if (!email || !password) {
+    const ip = getClientIP(req);
+    const { allowed, retryAfterSeconds } = rateLimit(ip, "login", 5, 15 * 60 * 1000);
+    if (!allowed) {
       return NextResponse.json(
-        { error: "กรุณากรอกอีเมลและรหัสผ่าน" },
+        { error: `ลองเข้าสู่ระบบหลายครั้งเกินไป กรุณารอ ${retryAfterSeconds} วินาที` },
+        { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+      );
+    }
+
+    const parsed = loginSchema.safeParse(await req.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.errors[0].message },
         { status: 400 }
       );
     }
+    const { email, password } = parsed.data;
 
     // Validate credentials using lib function
     const { valid, user } = await validateUserCredentials(email, password);
@@ -50,7 +66,10 @@ export async function POST(req: NextRequest) {
 
     return response;
   } catch (error) {
-    console.error("Login error:", error);
+    trackError(error instanceof Error ? error : new Error(String(error)), {
+      url: "/api/auth/login",
+      action: "login",
+    });
     return NextResponse.json(
       { error: "เกิดข้อผิดพลาดในการเข้าสู่ระบบ" },
       { status: 500 }

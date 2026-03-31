@@ -11,6 +11,7 @@ import {
   saveFileToDatabase,
   FILE_CONFIG,
 } from "@/repositories/fileStorage";
+import { trackError } from "@/lib/errorTracking";
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,6 +38,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // ตรวจสอบขนาดรวมทั้งหมด
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > FILE_CONFIG.maxTotalSize) {
+      const maxMB = FILE_CONFIG.maxTotalSize / (1024 * 1024);
+      return NextResponse.json(
+        { error: `ขนาดไฟล์รวมเกิน ${maxMB} MB` },
+        { status: 400 }
+      );
+    }
+
     // ✅ OPTIMIZATION 1: Validate ทุกไฟล์ก่อน (fail fast)
     const validationErrors: string[] = [];
     for (const file of files) {
@@ -55,7 +66,6 @@ export async function POST(req: NextRequest) {
 
     // ✅ OPTIMIZATION 2: อัพโหลดแบบ Parallel (Promise.all)
     // เร็วกว่าเดิม ~70% เพราะทำพร้อมกันแทนทีละไฟล์
-    console.time("Parallel Upload");
 
     const uploadPromises = files.map((file) =>
       saveFileToDatabase(file, user.userId)
@@ -77,8 +87,7 @@ export async function POST(req: NextRequest) {
     );
 
     const results = await Promise.all(uploadPromises);
-    console.timeEnd("Parallel Upload");
-
+    
     // ตรวจสอบว่ามีไฟล์ที่อัพโหลดล้มเหลวหรือไม่
     const failedUploads = results.filter((r) => !r.success);
     const successUploads = results.filter((r) => r.success);
@@ -107,7 +116,10 @@ export async function POST(req: NextRequest) {
       count: successUploads.length,
     });
   } catch (error: unknown) {
-    console.error("Error uploading files:", error);
+    trackError(error instanceof Error ? error : new Error(String(error)), {
+      url: "/api/upload",
+      action: "upload_files",
+    });
     return NextResponse.json(
       { error: "เกิดข้อผิดพลาดในการอัพโหลดไฟล์" },
       { status: 500 }

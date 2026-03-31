@@ -56,7 +56,7 @@ export function setAuthCookie(response: NextResponse, token: string): void {
 
   response.cookies.set("auth-token", token, {
     httpOnly: true,
-    secure: false, // ใช้ HTTPS ใน production เท่านั้น
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 1, // 1 วัน
     path: "/",

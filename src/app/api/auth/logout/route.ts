@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clearAuthCookie } from "@/lib/auth";
+import { trackError } from "@/lib/errorTracking";
 
 export async function POST() {
   try {
@@ -14,7 +15,10 @@ export async function POST() {
 
     return response;
   } catch (error) {
-    console.error("Logout error:", error);
+    trackError(error instanceof Error ? error : new Error(String(error)), {
+      url: "/api/auth/logout",
+      action: "logout",
+    });
     return NextResponse.json(
       { error: "เกิดข้อผิดพลาดในการออกจากระบบ" },
       { status: 500 }

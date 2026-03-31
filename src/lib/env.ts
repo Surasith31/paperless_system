@@ -9,7 +9,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   JWT_EXPIRES_IN: z.string().default("7d"),
-  NEXT_PUBLIC_APP_URL: z.string().url().optional(),
+  NEXT_PUBLIC_APP_URL: z.string().url().optional().default("http://localhost:3000"),
+  UPLOAD_DIR: z.string().min(1, "UPLOAD_DIR is required"),
 });
 
 // Type for environment variables
@@ -32,10 +33,9 @@ function validateEnv(): Env {
 export const env = validateEnv();
 
 // Export individual values for convenience
-export const {
-  NODE_ENV,
-  DATABASE_URL,
-  JWT_SECRET,
-  JWT_EXPIRES_IN,
-  NEXT_PUBLIC_APP_URL,
-} = env;
+export const NODE_ENV: string = env.NODE_ENV;
+export const DATABASE_URL: string = env.DATABASE_URL;
+export const JWT_SECRET: string = env.JWT_SECRET;
+export const JWT_EXPIRES_IN: string = env.JWT_EXPIRES_IN;
+export const NEXT_PUBLIC_APP_URL: string = env.NEXT_PUBLIC_APP_URL;
+export const UPLOAD_DIR: string = env.UPLOAD_DIR;

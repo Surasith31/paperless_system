@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendOTPEmail } from "@/lib/email";
 import { pool } from "@/lib/db";
+import { rateLimit, getClientIP } from "@/lib/rateLimiter";
+import { PoolClient } from "pg";
+import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
   try {
+    const ip = getClientIP(request);
+    const { allowed, retryAfterSeconds } = rateLimit(ip, "forgot-password", 3, 15 * 60 * 1000);
+    if (!allowed) {
+      return NextResponse.json(
+        { success: false, error: `ส่งคำขอหลายครั้งเกินไป กรุณารอ ${retryAfterSeconds} วินาที` },
+        { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+      );
+    }
+
     const { email } = await request.json();
 
     // Validate email
@@ -30,23 +42,31 @@ export async function POST(request: NextRequest) {
     const user = userResult.rows[0];
 
     // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = crypto.randomInt(100000, 1000000).toString();
 
     // OTP expires in 10 minutes
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Delete old OTPs for this user
-    await pool.query(
-      "DELETE FROM password_reset_otps WHERE user_id = $1",
-      [user.id]
-    );
-
-    // Save OTP to database
-    await pool.query(
-      `INSERT INTO password_reset_otps (user_id, email, otp, expires_at)
-       VALUES ($1, $2, $3, $4)`,
-      [user.id, email, otp, expiresAt]
-    );
+    // Delete old OTPs และ Insert ใหม่ใน transaction เดียวกัน
+    const otpClient: PoolClient = await pool.connect();
+    try {
+      await otpClient.query("BEGIN");
+      await otpClient.query(
+        "DELETE FROM password_reset_otps WHERE user_id = $1",
+        [user.id]
+      );
+      await otpClient.query(
+        `INSERT INTO password_reset_otps (user_id, email, otp, expires_at)
+         VALUES ($1, $2, $3, $4)`,
+        [user.id, email, otp, expiresAt]
+      );
+      await otpClient.query("COMMIT");
+    } catch (err) {
+      await otpClient.query("ROLLBACK");
+      throw err;
+    } finally {
+      otpClient.release();
+    }
 
     // Send OTP via email
     const emailSent = await sendOTPEmail({

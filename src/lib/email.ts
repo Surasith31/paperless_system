@@ -40,12 +40,14 @@ export async function sendOTPEmail({
   try {
     const transporter = createTransporter();
 
-    // Development mode or no SMTP config: แสดง OTP ใน console
     if (!transporter) {
+      if (process.env["NODE_ENV"] === "production") {
+        throw new Error("SMTP ไม่ได้ตั้งค่า ไม่สามารถส่ง OTP ได้");
+      }
+      // Development: log OTP ออก console แทนการส่งอีเมล
+      console.warn(`[DEV] OTP สำหรับ ${email} (${name}): ${otp}`);
       return true;
     }
-
-    // Production mode: ส่งอีเมลจริง
     const mailOptions = {
       from: `"Paperless System" <${
         process.env["EMAIL_FROM"] || process.env["SMTP_USER"]
@@ -161,7 +163,11 @@ export async function sendApprovalRequestEmail(
     const transporter = createTransporter();
 
     if (!transporter) {
-      return true;
+      if (process.env["NODE_ENV"] === "production") {
+        throw new Error("SMTP ไม่ได้ตั้งค่า ไม่สามารถส่งอีเมลได้");
+      }
+      console.warn("[DEV] SMTP ไม่ได้ตั้งค่า — ข้ามการส่งอีเมล");
+      return false;
     }
 
     const approvalLink = `${process.env["APP_URL"]}/page/manager`;
@@ -281,7 +287,11 @@ export async function sendApprovalNotificationEmail(
     const transporter = createTransporter();
 
     if (!transporter) {
-      return true;
+      if (process.env["NODE_ENV"] === "production") {
+        throw new Error("SMTP ไม่ได้ตั้งค่า ไม่สามารถส่งอีเมลได้");
+      }
+      console.warn("[DEV] SMTP ไม่ได้ตั้งค่า — ข้ามการส่งอีเมล");
+      return false;
     }
 
     const documentsLink = `${process.env["APP_URL"]}/page/sell/my-documents`;
@@ -401,7 +411,11 @@ export async function sendRejectionNotificationEmail(
     const transporter = createTransporter();
 
     if (!transporter) {
-      return true;
+      if (process.env["NODE_ENV"] === "production") {
+        throw new Error("SMTP ไม่ได้ตั้งค่า ไม่สามารถส่งอีเมลได้");
+      }
+      console.warn("[DEV] SMTP ไม่ได้ตั้งค่า — ข้ามการส่งอีเมล");
+      return false;
     }
 
     const documentsLink = `${process.env["APP_URL"]}/page/sell/my-documents`;
@@ -521,7 +535,11 @@ export async function sendEngineerAssignmentEmail(
     const transporter = createTransporter();
 
     if (!transporter) {
-      return true;
+      if (process.env["NODE_ENV"] === "production") {
+        throw new Error("SMTP ไม่ได้ตั้งค่า ไม่สามารถส่งอีเมลได้");
+      }
+      console.warn("[DEV] SMTP ไม่ได้ตั้งค่า — ข้ามการส่งอีเมล");
+      return false;
     }
 
     const workLink = `${process.env["APP_URL"]}/page/engineer`;
@@ -640,7 +658,11 @@ export async function sendCompletionNotificationEmail(
     const transporter = createTransporter();
 
     if (!transporter) {
-      return true;
+      if (process.env["NODE_ENV"] === "production") {
+        throw new Error("SMTP ไม่ได้ตั้งค่า ไม่สามารถส่งอีเมลได้");
+      }
+      console.warn("[DEV] SMTP ไม่ได้ตั้งค่า — ข้ามการส่งอีเมล");
+      return false;
     }
 
     // กำหนด link ตาม role

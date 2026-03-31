@@ -2,15 +2,16 @@
 // File Storage in File System
 // ================================================================
 import { pool } from "../lib/db";
+import { UPLOAD_DIR } from "../lib/env";
 import sharp from "sharp";
 import fs from "fs/promises";
 import path from "path";
 
-const ROOT_PATH = process.env["UPLOAD_DIR"]!;
+const ROOT_PATH = UPLOAD_DIR;
 
 export const FILE_CONFIG = {
-  maxFileSize: Infinity,
-  maxTotalSize: Infinity,
+  maxFileSize: 50 * 1024 * 1024,      // 50 MB ต่อไฟล์
+  maxTotalSize: 200 * 1024 * 1024,    // 200 MB รวมทั้งหมดต่อครั้ง
   maxFiles: 10,
   allowedTypes: {
     images: ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"],
@@ -52,7 +53,10 @@ export async function ensureUploadDirs() {
 // Validate File
 // ================================================================
 export function validateFile(file: File): { valid: boolean; error?: string } {
-  // ไม่ตรวจสอบขนาดไฟล์แล้ว - ยอมรับทุกขนาด
+  if (file.size > FILE_CONFIG.maxFileSize) {
+    const maxMB = FILE_CONFIG.maxFileSize / (1024 * 1024);
+    return { valid: false, error: `ไฟล์ขนาดใหญ่เกินไป สูงสุด ${maxMB} MB ต่อไฟล์` };
+  }
 
   const allAllowedTypes = [
     ...FILE_CONFIG.allowedTypes.images,
@@ -270,6 +274,29 @@ export async function getThumbnailPathById(
   );
 
   return result.rows[0]?.thumbnail_path || null;
+}
+
+/**
+ * Get file info (path + document_id + name) by file ID — ใช้สำหรับ activity log
+ */
+export async function getFileInfoById(fileId: number): Promise<{
+  filePath: string;
+  thumbnailPath: string;
+  documentId: number;
+  fileName: string;
+} | null> {
+  const result = await pool.query(
+    `SELECT file_path, thumbnail_path, document_id, file_name FROM document_files WHERE id = $1`,
+    [fileId]
+  );
+
+  if (!result.rows[0]) return null;
+  return {
+    filePath: result.rows[0].file_path,
+    thumbnailPath: result.rows[0].thumbnail_path,
+    documentId: result.rows[0].document_id,
+    fileName: result.rows[0].file_name,
+  };
 }
 
 /**

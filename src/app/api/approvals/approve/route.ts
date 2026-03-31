@@ -20,6 +20,14 @@ import {
 import { ApproveRequest } from "@/models/workflow";
 import { logActivity } from "@/repositories/activities";
 import { pool } from "@/lib/db";
+import { trackError } from "@/lib/errorTracking";
+import { z } from "zod";
+
+const approveSchema = z.object({
+  document_id: z.number({ invalid_type_error: "document_id ต้องเป็นตัวเลข" }).int().positive(),
+  engineer_id: z.number().int().positive().optional().nullable(),
+  comment: z.string().max(1000).optional(),
+});
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,16 +46,14 @@ export async function POST(req: NextRequest) {
     }
 
     // รับข้อมูลจาก request
-    const body: ApproveRequest = await req.json();
-    const { document_id, engineer_id, comment } = body;
-
-    // Validate input
-    if (!document_id) {
+    const parsed = approveSchema.safeParse(await req.json());
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "กรุณาระบุ document_id" },
+        { error: parsed.error.errors[0].message },
         { status: 400 }
       );
     }
+    const { document_id, engineer_id, comment } = parsed.data;
 
     // ตรวจสอบว่ามี Engineer ID หรือไม่ (optional)
     let engineerIdToUse = null;
@@ -80,24 +86,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // อนุมัติเอกสาร
-    const result = await approveDocument(
-      document_id,
-      user.userId,
-      engineerIdToUse,
-      comment
-    );
+    // อนุมัติเอกสาร + บันทึก activity log ใน transaction เดียวกัน
+    const txClient = await pool.connect();
+    let result;
+    try {
+      await txClient.query("BEGIN");
 
-    // บันทึก activity log
-    await logActivity(
-      user.userId,
-      document_id,
-      "document_approved",
-      engineerIdToUse
-        ? `อนุมัติเอกสารและส่งต่อให้ Engineer (ID: ${engineerIdToUse})`
-        : "อนุมัติเอกสาร",
-      { engineer_id: engineerIdToUse, comment }
-    );
+      result = await approveDocument(
+        document_id,
+        user.userId,
+        engineerIdToUse,
+        comment,
+        txClient
+      );
+
+      await logActivity(
+        user.userId,
+        document_id,
+        "document_approved",
+        engineerIdToUse
+          ? `อนุมัติเอกสารและส่งต่อให้ Engineer (ID: ${engineerIdToUse})`
+          : "อนุมัติเอกสาร",
+        { engineer_id: engineerIdToUse, comment },
+        txClient
+      );
+
+      await txClient.query("COMMIT");
+    } catch (err) {
+      await txClient.query("ROLLBACK");
+      throw err;
+    } finally {
+      txClient.release();
+    }
 
     // ส่ง email แจ้งเตือน (ไม่ block response)
     const client = await pool.connect();
@@ -161,7 +181,10 @@ export async function POST(req: NextRequest) {
       workflow: result.workflow,
     });
   } catch (error: unknown) {
-    console.error("Error approving document:", error);
+    trackError(error instanceof Error ? error : new Error(String(error)), {
+      url: "/api/approvals/approve",
+      action: "approve_document",
+    });
     return NextResponse.json(
       { error: "เกิดข้อผิดพลาดในการอนุมัติเอกสาร" },
       { status: 500 }

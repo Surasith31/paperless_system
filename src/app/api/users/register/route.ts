@@ -1,18 +1,28 @@
 // POST /api/users/register
 import { NextRequest, NextResponse } from "next/server";
 import { checkEmailExists, createUser } from "@/repositories/users";
+import { trackError } from "@/lib/errorTracking";
+import { z } from "zod";
+
+const registerSchema = z.object({
+  name: z.string().min(1, "กรุณากรอกชื่อ"),
+  email: z.string().email("รูปแบบอีเมลไม่ถูกต้อง"),
+  password: z.string().min(8, "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร"),
+  role: z.union([z.literal(1), z.literal(2), z.literal(3)], {
+    errorMap: () => ({ message: "Role ไม่ถูกต้อง" }),
+  }),
+});
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, password, role } = await req.json();
-
-    // Validate input
-    if (!name || !email || !password || !role) {
+    const parsed = registerSchema.safeParse(await req.json());
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "กรุณากรอกข้อมูลให้ครบถ้วน" },
+        { error: parsed.error.errors[0].message },
         { status: 400 }
       );
     }
+    const { name, email, password, role } = parsed.data;
 
     // ตรวจสอบว่ามี email นี้แล้วหรือยัง
     const emailExists = await checkEmailExists(email);
@@ -33,7 +43,10 @@ export async function POST(req: NextRequest) {
       user: user,
     });
   } catch (error) {
-    console.error("Register error:", error);
+    trackError(error instanceof Error ? error : new Error(String(error)), {
+      url: "/api/users/register",
+      action: "register_user",
+    });
     return NextResponse.json(
       { error: "เกิดข้อผิดพลาดในการสมัครสมาชิก" },
       { status: 500 }

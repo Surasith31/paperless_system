@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { checkUserAccessToDocument } from "@/repositories/documents";
+import { UPLOAD_DIR } from "@/lib/env";
 import fs from "fs/promises";
 import path from "path";
+import { trackError } from "@/lib/errorTracking";
 
-const uploadsDir = path.join(process.cwd(), "uploads");
+const uploadsDir = UPLOAD_DIR;
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> }
+  { params }: { params: Promise<{ path: string[] }> },
 ) {
   try {
     // ✅ เช็ค Authentication
@@ -26,19 +28,31 @@ export async function GET(
       const documentId = parseInt(String(match[1]));
       const hasAccess = await checkUserAccessToDocument(
         user.userId,
-        documentId
+        documentId,
       );
 
       if (!hasAccess) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
+    } else {
+      // temp files — เช็คว่าเป็นของ user เองหรือไม่
+      const tempMatch = filePathStr.match(/^temp\/(\d+)\//);
+      if (tempMatch && tempMatch[1]) {
+        const ownerId = parseInt(tempMatch[1]);
+        if (ownerId !== user.userId) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
+      } else {
+        // path ไม่ตรง pattern ใดเลย — ปฏิเสธไว้ก่อน
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
     }
-    // ถ้าไม่ match pattern (เช่น temp files) ให้ผ่านไปได้
 
     const fullPath = path.join(uploadsDir, ...filePath);
 
-    const normalizedPath = path.normalize(fullPath);
-    if (!normalizedPath.startsWith(uploadsDir)) {
+    const normalizedFull = path.normalize(fullPath);
+    const normalizedBase = path.normalize(uploadsDir);
+    if (!normalizedFull.startsWith(normalizedBase)) {
       return NextResponse.json({ error: "Invalid path" }, { status: 403 });
     }
 
@@ -68,14 +82,17 @@ export async function GET(
     return new NextResponse(new Uint8Array(fileBuffer), {
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "private, no-cache, max-age=0",
       },
     });
   } catch (error) {
-    console.error("❌ Error serving file:", error);
+    trackError(error instanceof Error ? error : new Error(String(error)), {
+      url: "/api/uploads",
+      action: "serve_file",
+    });
     return NextResponse.json(
       { error: "Failed to serve file" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

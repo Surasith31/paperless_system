@@ -15,8 +15,10 @@ import { DocumentSubmitRequest } from "@/models/document";
 import fs from "fs/promises";
 import path from "path";
 import { pool } from "@/lib/db";
+import { UPLOAD_DIR } from "@/lib/env";
+import { trackError } from "@/lib/errorTracking";
 
-const ROOT_PATH = process.env["UPLOAD_DIR"]!;
+const ROOT_PATH = UPLOAD_DIR;
 
 export async function POST(req: NextRequest) {
   const client = await pool.connect();
@@ -294,7 +296,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     await client.query("ROLLBACK");
-    console.error("Error submitting document:", error);
+    trackError(error instanceof Error ? error : new Error(String(error)), {
+      url: "/api/documents/submit",
+      action: "submit_document",
+    });
     return NextResponse.json(
       { error: "เกิดข้อผิดพลาดในการส่งเอกสาร" },
       { status: 500 }

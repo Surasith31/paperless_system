@@ -53,17 +53,19 @@ export async function approveDocument(
   documentId: number,
   approverId: number,
   engineerId: number | null,
-  comment?: string
+  comment?: string,
+  externalClient?: PoolClient
 ): Promise<{ approval: Approval; workflow: DocumentWorkflow }> {
-  const client = await pool.connect();
+  const client = externalClient ?? await pool.connect();
+  const ownTransaction = !externalClient;
 
   try {
-    await client.query("BEGIN");
+    if (ownTransaction) await client.query("BEGIN");
 
     // 1. อัพเดท approval record
     const approvalResult = await client.query(
-      `UPDATE approvals 
-      SET status = 'approved', 
+      `UPDATE approvals
+      SET status = 'approved',
           approved_at = NOW(),
           comment = $1
       WHERE document_id = $2 AND approver_id = $3 AND status = 'pending'
@@ -82,7 +84,7 @@ export async function approveDocument(
     if (engineerId) {
       // ส่งต่อให้ Engineer
       workflowUpdate = await client.query(
-        `UPDATE document_workflows 
+        `UPDATE document_workflows
         SET current_step = 2,
             current_approver_id = $1,
             assigned_by = $2,
@@ -95,7 +97,7 @@ export async function approveDocument(
 
       // สร้าง approval record สำหรับ Engineer
       await client.query(
-        `INSERT INTO approvals 
+        `INSERT INTO approvals
           (document_id, workflow_id, approver_id, workflow_step, status)
         VALUES ($1, $2, $3, 2, 'pending')`,
         [documentId, approval.workflow_id, engineerId]
@@ -110,7 +112,7 @@ export async function approveDocument(
     } else {
       // จบ workflow (ไม่ส่งต่อให้ Engineer)
       workflowUpdate = await client.query(
-        `UPDATE document_workflows 
+        `UPDATE document_workflows
         SET status = 'completed',
             completed_at = NOW()
         WHERE document_id = $1
@@ -126,17 +128,17 @@ export async function approveDocument(
       );
     }
 
-    await client.query("COMMIT");
+    if (ownTransaction) await client.query("COMMIT");
 
     return {
       approval: approval,
       workflow: workflowUpdate.rows[0],
     };
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (ownTransaction) await client.query("ROLLBACK");
     throw error;
   } finally {
-    client.release();
+    if (ownTransaction) client.release();
   }
 }
 
@@ -144,17 +146,19 @@ export async function approveDocument(
 export async function rejectDocument(
   documentId: number,
   approverId: number,
-  comment: string
+  comment: string,
+  externalClient?: PoolClient
 ): Promise<{ approval: Approval; workflow: DocumentWorkflow }> {
-  const client = await pool.connect();
+  const client = externalClient ?? await pool.connect();
+  const ownTransaction = !externalClient;
 
   try {
-    await client.query("BEGIN");
+    if (ownTransaction) await client.query("BEGIN");
 
     // 1. อัพเดท approval record
     const approvalResult = await client.query(
-      `UPDATE approvals 
-      SET status = 'rejected', 
+      `UPDATE approvals
+      SET status = 'rejected',
           rejected_at = NOW(),
           comment = $1
       WHERE document_id = $2 AND approver_id = $3 AND status = 'pending'
@@ -170,7 +174,7 @@ export async function rejectDocument(
 
     // 2. อัพเดท workflow เป็น rejected
     const workflowUpdate = await client.query(
-      `UPDATE document_workflows 
+      `UPDATE document_workflows
       SET status = 'rejected',
           completed_at = NOW()
       WHERE document_id = $1
@@ -185,17 +189,17 @@ export async function rejectDocument(
       [documentId]
     );
 
-    await client.query("COMMIT");
+    if (ownTransaction) await client.query("COMMIT");
 
     return {
       approval: approval,
       workflow: workflowUpdate.rows[0],
     };
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (ownTransaction) await client.query("ROLLBACK");
     throw error;
   } finally {
-    client.release();
+    if (ownTransaction) client.release();
   }
 }
 

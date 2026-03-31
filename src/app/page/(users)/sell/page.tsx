@@ -61,11 +61,6 @@ export default function SellSubmitDocument() {
         const data = await response.json();
         if (data.success && data.user) {
           setUser(data.user);
-
-          // Check if user is Sell
-          if (data.user.role !== 1) {
-            router.push("/page/dashboard");
-          }
         }
       } catch (err) {
         console.error("Error:", err);
@@ -100,15 +95,30 @@ export default function SellSubmitDocument() {
     addFiles(files);
   };
 
+  const MAX_FILE_SIZE = 50 * 1024 * 1024;   // 50 MB
+  const MAX_TOTAL_SIZE = 200 * 1024 * 1024; // 200 MB
+
   const addFiles = (files: File[]) => {
-    // ตรวจสอบจำนวนไฟล์ (สูงสุด 10 ไฟล์)
     const totalFiles = selectedFiles.length + files.length;
     if (totalFiles > 10) {
       setError("สามารถอัพโหลดได้สูงสุด 10 ไฟล์");
       return;
     }
 
-    // ไม่จำกัดขนาดไฟล์แล้ว - เอาออกทั้งหมด
+    for (const file of files) {
+      if (file.size > MAX_FILE_SIZE) {
+        setError(`ไฟล์ "${file.name}" ขนาดใหญ่เกินไป สูงสุด 50 MB ต่อไฟล์`);
+        return;
+      }
+    }
+
+    const currentTotal = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+    const newTotal = files.reduce((sum, f) => sum + f.size, 0);
+    if (currentTotal + newTotal > MAX_TOTAL_SIZE) {
+      setError("ขนาดไฟล์รวมเกิน 200 MB");
+      return;
+    }
+
     setSelectedFiles([...selectedFiles, ...files]);
     setError("");
   };
@@ -341,7 +351,7 @@ export default function SellSubmitDocument() {
             <label className="block text-sm font-semibold text-gray-800 mb-2">
               ไฟล์เอกสาร <span className="text-red-500">*</span>
               <span className="text-xs text-gray-500 ml-2 font-normal">
-                (สูงสุด 10 ไฟล์, ไม่จำกัดขนาด)
+                (สูงสุด 10 ไฟล์, 50 MB/ไฟล์, รวมไม่เกิน 200 MB)
               </span>
             </label>
 
@@ -372,7 +382,7 @@ export default function SellSubmitDocument() {
                       หรือลากไฟล์มาวาง
                     </p>
                     <p className="text-xs text-gray-500">
-                      PDF, Excel, PNG, JPG, GIF (ไม่จำกัดขนาด)
+                      PDF, Excel, PNG, JPG, GIF (สูงสุด 50 MB/ไฟล์)
                     </p>
                   </div>
                   <input

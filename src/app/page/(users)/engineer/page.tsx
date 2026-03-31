@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import {
@@ -23,6 +23,7 @@ import {
   Paperclip,
   ImageIcon,
   FileSpreadsheet,
+  RefreshCw,
 } from "lucide-react";
 import { userGetResponse } from "@/models/user";
 import ActivityTimeline from "@/components/ActivityTimeline";
@@ -60,6 +61,10 @@ export default function EngineerTasks() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
+  // Polling states
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   // Status update states
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedDocForStatus, setSelectedDocForStatus] =
@@ -87,11 +92,6 @@ export default function EngineerTasks() {
         const data = await response.json();
         if (data.success && data.user) {
           setUser(data.user);
-
-          // Check if user is Engineer
-          if (data.user.role !== 3) {
-            router.push("/page/dashboard");
-          }
         }
       } catch (err) {
         console.error("Error:", err);
@@ -108,6 +108,7 @@ export default function EngineerTasks() {
         if (response.ok) {
           const data = await response.json();
           setDocuments(data.documents || []);
+          setLastUpdated(new Date());
         }
       } catch (err) {
         console.error("Error fetching documents:", err);
@@ -120,9 +121,42 @@ export default function EngineerTasks() {
     fetchAssignedDocuments();
   }, [router]);
 
-  // ESC key handler for modals
+  // Silent poll สำหรับ background refresh
+  const silentFetch = useCallback(async () => {
+    try {
+      const response = await fetch("/api/documents/assigned", {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDocuments((prev) => {
+          if (data.documents?.length > prev.length) {
+            setStatusSuccess(`มีงานใหม่ ${data.documents.length - prev.length} รายการ`);
+            setTimeout(() => setStatusSuccess(""), 4000);
+          }
+          return data.documents || [];
+        });
+        setLastUpdated(new Date());
+      }
+    } catch {
+      // ไม่แสดง error สำหรับ background poll
+    }
+  }, []);
+
+  // Auto poll ทุก 30 วินาที
   useEffect(() => {
-    const handleEscKey = (event: KeyboardEvent) => {
+    const interval = setInterval(silentFetch, 30000);
+    return () => clearInterval(interval);
+  }, [silentFetch]);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await silentFetch();
+    setIsRefreshing(false);
+  };
+
+  // ESC key handler for modals
+  useEffect(() => {    const handleEscKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (showStatusModal) {
           setShowStatusModal(false);
@@ -549,6 +583,23 @@ export default function EngineerTasks() {
             }`}
           >
             เสร็จสิ้นแล้ว ({tabCounts.completed})
+          </button>
+        </div>
+
+        {/* Refresh Bar */}
+        <div className="flex items-center justify-between mt-6 mb-3 px-1">
+          <span className="text-xs text-gray-400">
+            {lastUpdated
+              ? `อัปเดตล่าสุด ${lastUpdated.toLocaleTimeString("th-TH")}`
+              : "กำลังโหลด..."}
+          </span>
+          <button
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50 transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+            รีเฟรช
           </button>
         </div>
 

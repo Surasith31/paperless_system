@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
-import { getFilePathById } from "@/repositories/fileStorage";
+import { getFileInfoById } from "@/repositories/fileStorage";
+import { logActivity } from "@/repositories/activities";
 
 export async function GET(
   request: NextRequest,
@@ -19,23 +20,32 @@ export async function GET(
       return NextResponse.json({ error: "Invalid file ID" }, { status: 400 });
     }
 
-    const filePath = await getFilePathById(fileId);
+    const fileInfo = await getFileInfoById(fileId);
 
-    if (!filePath) {
+    if (!fileInfo) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    // ✅ Redirect ไปที่ /api/uploads/{file_path}
+    // บันทึก activity log
+    await logActivity(
+      user.userId,
+      fileInfo.documentId,
+      "file_downloaded",
+      `ดาวน์โหลดไฟล์ "${fileInfo.fileName}"`,
+      { file_id: fileId, file_name: fileInfo.fileName }
+    );
+
+    // Redirect ไปที่ /api/uploads/{file_path}
     const host =
       request.headers.get("x-forwarded-host") || request.nextUrl.host;
     const protocol =
       request.headers.get("x-forwarded-proto") ||
       request.nextUrl.protocol.replace(":", "");
-    const absoluteUrl = `${protocol}://${host}/api/uploads/${filePath}`;
+    const absoluteUrl = `${protocol}://${host}/api/uploads/${fileInfo.filePath}`;
 
     return NextResponse.redirect(absoluteUrl, { status: 302 });
   } catch (error) {
-    console.error("🔥 File API Error:", error);
+    console.error("File API Error:", error);
     return NextResponse.json({ error: "Failed to get file" }, { status: 500 });
   }
 }
